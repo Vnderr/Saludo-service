@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  saludo-app:
+    build: .
+    container_name: saludo-service-container
+    ports:
+      
+"8080:8080"
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+    interval: 10s
+    timeout: 5s
+    retries: 3
