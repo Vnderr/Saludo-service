@@ -1,13 +1,19 @@
-version: '3.8'
-
 services:
   saludo-app:
-    build: .
+    # IMPORTANTE: Reemplaza con la URL real de tu AWS ECR para que funcione el 'docker compose pull' del pipeline
+    image: 590184124491.dkr.ecr.us-east-1.amazonaws.com/saludo-service:latest
     container_name: saludo-service-container
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/actuator/health" ]
       interval: 10s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
+    logging:
+      driver: "awslogs"
+      options:
+        awslogs-region: "us-east-1"
+        awslogs-group: "saludo-service-logs"
+        awslogs-create-group: "true"
