@@ -3,17 +3,19 @@ name: CI/CD Pipeline - saludo-service
 # Trigger: push a main y pull requests
 on:
   push:
-    branches: [ main     ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
+    workflow_dispatch: {}
 
 env:
   JAVA_VERSION: '21'
   IMAGE_NAME: saludo-service
+  AWS_REGION: us-east-1 
 
 jobs:
 
-  # JOB 1: Snyk Security Scan (IE3)
+  # JOB 1: Snyk Security Scan 
   snyk-scan:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
@@ -38,10 +40,11 @@ jobs:
       - name: Run Snyk Setup
         uses: snyk/actions/setup@master
 
+      # el pipeline lanzará un error y se detendrá inmediatamente, protegiendo producción.
       - name: Run Snyk test (falla si hay vulnerabilidades HIGH)
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk test --severity-threshold=high || true
+        run: snyk test --severity-threshold=high
 
       - name: Generate Snyk JSON Report
         if: always()
@@ -94,7 +97,7 @@ jobs:
           name: test-results
           path: target/surefire-reports/
 
-  # JOB 3: SonarCloud Analysis
+  # JOB 3: SonarCloud Analysis 
   sonar-analysis:
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
@@ -135,85 +138,65 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
 
-  # JOB 4: Build imagen Docker
+  # JOB 4: Construcción y publicación en AWS ECR
   build:
-    name: Build Docker Image
+    name: Build & Push to AWS ECR
     runs-on: ubuntu-latest
     needs: sonar-analysis
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log a Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
+      - name: Build and Push Docker image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: saludo-service # Debe coincidir con el nombre de tu repositorio en AWS ECR
         run: |
-          docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
-          docker build -t ${{ env.IMAGE_NAME }}:latest .
+          docker buildx build --push -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }} .
+          docker buildx build --push -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
 
-      - name: Verify image was built
-        run: docker images | grep ${{ env.IMAGE_NAME }}
-
-  # JOB 5: Deploy con Docker Compose
+  # JOB 5: Despliegue Remoto en AWS EC2 mediante SSM
   deploy:
-    name: Deploy Docker Compose
+    name: Deploy to AWS EC2 via SSM
     runs-on: ubuntu-latest
-    needs: [ build, sonar-analysis ]
-    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/tests') && github.event_name == 'push'
+    needs: build
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          distribution: 'temurin'
-          java-version: ${{ env.JAVA_VERSION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Cache Maven dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2-
-
-      - name: Build JAR
-        run: mvn clean package -DskipTests -B
-
-      - name: Deploy with Docker Compose
-        run: docker compose up -d --build
-
-      - name: Health check (espera hasta 2 minutos)
+      # Enviamos las instrucciones de ejecución remota a la instancia utilizando AWS Systems Manager
+      - name: Execute remote commands via AWS SSM
         run: |
-          echo "Esperando que la app arranque..."
-          for i in $(seq 1 12); do
-            if curl -sf http://localhost:8080/actuator/health; then
-              echo "App levantada correctamente"
-              exit 0
-            fi
-            echo "Intento $i/12 - esperando 10s..."
-            sleep 10
-          done
-          echo "Health check falló después de 2 minutos"
-          exit 1
-
-      - name: Smoke test
-        run: |
-          curl -sf http://localhost:8080/actuator/health
-          echo "Smoke tests pasaron"
-
-      - name: Upload deploy logs
-        if: always()
-        run: docker compose logs > deploy-logs.txt 2>&1
-
-      - name: Upload logs artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: deploy-logs
-          path: deploy-logs.txt
-
-      - name: Cleanup
-        if: always()
-        run: docker compose down -v
+          aws ssm send-command \
+            --instance-ids "${{ secrets.AWS_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Actualizando contenedor Saludo-Service desde Amazon ECR" \
+            --parameters 'commands=[
+              "cd /home/ubuntu/app",
+              "aws ecr get-login-password --region '"${{ env.AWS_REGION }}"' | sudo docker login --username AWS --password-stdin '"${{ secrets.AWS_ACCOUNT_ID }}"'.dkr.ecr.'"${{ env.AWS_REGION }}"'.amazonaws.com",
+              "sudo docker compose pull",
+              "sudo docker compose up -d"
+            ]' \
+            --output text
