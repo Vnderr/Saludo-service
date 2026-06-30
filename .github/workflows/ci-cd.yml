@@ -195,9 +195,11 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --comment "Actualizando contenedor Saludo-Service desde Amazon ECR" \
             --parameters 'commands=[
-              "cd /home/ubuntu/app",
+              "mkdir -p /home/ec2-user/app",
+              "cd /home/ec2-user/app",
               "aws ecr get-login-password --region '"${{ env.AWS_REGION }}"' | sudo docker login --username AWS --password-stdin '"${{ secrets.AWS_ACCOUNT_ID }}"'.dkr.ecr.'"${{ env.AWS_REGION }}"'.amazonaws.com",
-              "sudo docker compose pull",
-              "sudo docker compose up -d"
+              "sudo docker pull '"${{ secrets.AWS_ACCOUNT_ID }}"'.dkr.ecr.'"${{ env.AWS_REGION }}"'.amazonaws.com/saludo-service:latest",
+              "sudo docker rm -f saludo-service || true",
+              "sudo docker run -d --name saludo-service -p 8080:8080 '"${{ secrets.AWS_ACCOUNT_ID }}"'.dkr.ecr.'"${{ env.AWS_REGION }}"'.amazonaws.com/saludo-service:latest"
             ]' \
             --output text
