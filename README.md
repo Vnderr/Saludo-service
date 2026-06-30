@@ -1,61 +1,221 @@
-# Saludo Service — Pipeline CI/CD
-**Evaluación Parcial N°2**
+# Saludo Service — CI/CD en AWS
+**Evaluación Parcial N°3**
 
-Este proyecto consiste en un microservicio desarrollado en SpringBoot que utilizamos como base para implementar un pipeline de CI/CD automático mediante **GitHub Actions**, integrando pruebas, análisis de calidad estático y contenedores con Docker.
+Este proyecto corresponde a la extensión del pipeline de CI/CD desarrollado en la evaluación anterior, incorporando herramientas de **observabilidad, monitoreo y cumplimiento** dentro de un entorno real en AWS.
 
+La aplicación se despliega automáticamente sobre una **instancia Amazon EC2**, almacena sus imágenes en **Amazon ECR** y envía los logs del contenedor hacia **AWS CloudWatch**, permitiendo monitorear el comportamiento del microservicio durante su ejecución.
 
-##  Sobre el Proyecto
+---
 
-La aplicación es un servicio backend que expone los siguientes endpoints:
-* `GET /` -> Retorna un mensaje de bienvenida general con la versión del servicio.
-* `GET /saludo?nombre=X` -> Retorna un saludo personalizado (por defecto saluda a "Mundo").
-* `GET /info` -> Entrega información del microservicio (nombre, versión y descripción del laboratorio).
-* `GET /actuator/health` -> Endpoint nativo de monitoreo de salud (clave para verificar el estado de la app en el despliegue).
+## Sobre el Proyecto
 
-**Tecnologías ocupadas:** Spring Boot, Java 21 , Maven, JaCoCo, Docker , Docker Compose, Snyk y SonarCloud.
+La aplicación corresponde a un microservicio desarrollado en **Spring Boot**, que expone los siguientes endpoints:
 
+- `GET /` → Retorna un mensaje de bienvenida con la versión del servicio.
+- `GET /saludo?nombre=X` → Retorna un saludo personalizado (por defecto saluda a "Mundo").
+- `GET /info` → Entrega información del microservicio.
+- `GET /actuator/health` → Endpoint utilizado para verificar el estado de salud del servicio.
 
-##  Estructura del Pipeline
+**Tecnologías utilizadas:**
 
-Cada vez que subimos código a la rama `main`, GitHub Actions ejecuta estos 5 trabajos en secuencia:
+- Spring Boot
+- Java 21
+- Maven
+- GitHub Actions
+- Docker
+- Amazon EC2
+- Amazon ECR
+- AWS CloudWatch
+- SonarCloud
+- Snyk
+- JaCoCo
 
-1. **Snyk Security Scan:** Escanea el archivo `pom.xml` buscando vulnerabilidades en las librerías. 
-2. **Tests + Cobertura JaCoCo:** Compila el proyecto, corre las pruebas unitarias y genera los reportes de cobertura de código mediante JaCoCo.
-3. **SonarCloud Analysis:** Toma el reporte de JaCoCo generado en el paso anterior y analiza el código en SonarCloud para buscar bugs, malas prácticas o código duplicado.
-4. **Build Docker Image:** Si los pasos anteriores pasan con éxito, se construye la imagen Docker del microservicio.
-5. **Deploy Docker Compose:** Construye el archivo JAR final, levanta el contenedor usando Docker Compose y ejecuta un script de *Health check* que consulta el endpoint `/actuator/health` durante un máximo de 2 minutos. Si la app responde correctamente, el despliegue se da por exitoso; al final, se limpian los contenedores para mantener el entorno ordenado.
+---
 
+## Arquitectura del Pipeline
 
-##  Trazabilidad y Calidad
+Cada vez que se realiza un **push** sobre la rama `main`, GitHub Actions ejecuta automáticamente el pipeline completo.
 
-### Trazabilidad
-* **Historial por Commit:** Cada ejecución en la pestaña **Actions** queda amarrada al commit exacto (`github.sha`) que la gatilló, permitiendo rastrear el origen de cualquier fallo.
-* **Evidencias (Artefactos):** Al finalizar el pipeline, quedan disponibles para descarga los resultados de las pruebas unitarias, el reporte de cobertura de JaCoCo y los logs del despliegue (`deploy-logs.txt`).
+El flujo considera las siguientes etapas:
 
-### Calidad y Seguridad
-* **Análisis Automático:** SonarCloud evalúa la calidad del código en cada subida, asegurando que no se arrastre deuda técnica en los controladores ni servicios.
-* **Validación de Despliegue:** El pipeline incluye un *Smoke Test* en la etapa de despliegue. No asume que la app funciona solo por levantar el contenedor; verifica activamente que el servicio responda de forma correcta en el endpoint de salud antes de cerrar el flujo.
+1. **Snyk Security Scan**
+   - Analiza las dependencias del proyecto para detectar vulnerabilidades conocidas.
 
-* **Secrets:** Todas las credenciales sensibles (Tokens de Snyk y SonarCloud) se manejan de forma segura a través de los Secrets de GitHub Actions, evitando dejar claves expuestas en el código fuente.
+2. **Tests + Cobertura JaCoCo**
+   - Compila el proyecto.
+   - Ejecuta las pruebas unitarias.
+   - Genera el reporte de cobertura mediante JaCoCo.
 
-##  Configuración de Docker y Contenedores
+3. **SonarCloud Analysis**
+   - Analiza la calidad del código utilizando el reporte generado por JaCoCo.
+   - Detecta bugs, vulnerabilidades, duplicación y deuda técnica.
 
-El despliegue local y automatizado se gestiona mediante herramientas de contenedores:
+4. **Build Docker Image**
+   - Construye la imagen Docker del microservicio.
 
-* **Dockerfile Multi-stage:** Implementa una estructura en dos etapas. La primera fase usa una imagen de Maven con Java 21 para compilar y empaquetar el JAR (saltándose los tests para agilizar el build ya que fueron validados previamente). La segunda fase genera la imagen final utilizando únicamente el JRE ligero de Eclipse Temurin 21. Esto reduce drásticamente el tamaño de la imagen y evita llevar herramientas de desarrollo innecesarias a producción.
-* **Docker Compose:** Orquesta el levantamiento del contenedor (`saludo-app`) exponiendo el servicio a través del puerto `8080`.
+5. **Push hacia Amazon ECR**
+   - Publica automáticamente la imagen generada dentro del repositorio privado de Amazon Elastic Container Registry.
 
-**Uso de IA**:
-Se utilizó la ia como herramienta de apoyo para la creación del microservicio base, también en la corrección de errores en el ci-cd y en la estructuración de este archivo readme
+6. **Deploy automático en Amazon EC2**
+   - Mediante AWS Systems Manager (SSM) la instancia descarga la nueva imagen desde ECR.
+   - Elimina el contenedor anterior.
+   - Levanta la nueva versión del servicio.
+   - Expone la aplicación en el puerto `8080`.
 
-El diseño de la arquitectura del flujo, la resolución de la lógica en Java de los controladores y servicios, y la ejecución del laboratorio fueron realizados por el equipo de trabajo.
+7. **Health Check**
+   - El pipeline valida automáticamente que el endpoint `/actuator/health` responda correctamente.
+   - Si el servicio no queda operativo, el despliegue se considera inválido.
 
+---
 
-##  Cómo ejecutar en local
+## Observabilidad y Monitoreo
 
-**Con Docker Compose:**
+Uno de los principales objetivos de esta evaluación fue incorporar mecanismos de observabilidad dentro del proceso de despliegue.
+
+Para ello se utilizó **AWS CloudWatch**, configurando el contenedor Docker para enviar automáticamente todos sus logs mediante el driver oficial `awslogs`.
+
+Esto permite visualizar:
+
+- Logs de inicio de Spring Boot.
+- Errores de ejecución.
+- Excepciones.
+- Estado del microservicio.
+- Disponibilidad del servicio desplegado.
+
+La transmisión de logs se realiza de forma automática durante el despliegue, sin necesidad de instalar agentes adicionales dentro de la instancia EC2.
+
+---
+
+## Dashboard y Métricas
+
+Como parte de la observabilidad se utilizaron los servicios de AWS para visualizar información relevante del despliegue.
+
+Las principales métricas monitoreadas corresponden a:
+
+- Estado del microservicio.
+- Logs de ejecución.
+- Errores registrados.
+- Tiempo de despliegue.
+- Cobertura de pruebas (JaCoCo).
+- Calidad del código (SonarCloud).
+
+Estas métricas permiten identificar rápidamente problemas durante el proceso CI/CD y facilitar la toma de decisiones técnicas.
+
+---
+
+## Calidad, Seguridad y Cumplimiento
+
+### Calidad
+
+- SonarCloud analiza automáticamente el código en cada ejecución.
+- JaCoCo genera el porcentaje de cobertura de pruebas.
+- El despliegue solo continúa si las etapas anteriores finalizan correctamente.
+
+### Seguridad
+
+- Snyk analiza las dependencias del proyecto buscando vulnerabilidades conocidas.
+- Las imágenes Docker son almacenadas de forma privada en Amazon ECR.
+
+### Cumplimiento
+
+- Todas las credenciales utilizadas por el pipeline se almacenan como **GitHub Secrets**, evitando exponer información sensible.
+- El despliegue utiliza credenciales temporales de AWS Academy mediante `AWS_SESSION_TOKEN`.
+- El pipeline incluye una validación automática del endpoint de salud antes de finalizar el despliegue.
+
+De esta manera, ante una falla crítica durante las etapas de calidad o seguridad, el pipeline se detiene automáticamente evitando desplegar una versión incorrecta del sistema.
+
+---
+
+## Infraestructura Utilizada
+
+La solución fue implementada utilizando servicios de AWS.
+
+Se utilizaron los siguientes componentes:
+
+- **Amazon EC2:** servidor donde se ejecuta el microservicio.
+- **Amazon ECR:** almacenamiento privado para imágenes Docker.
+- **AWS Systems Manager (SSM):** ejecución remota del despliegue desde GitHub Actions.
+- **AWS CloudWatch:** almacenamiento y visualización de logs del contenedor.
+
+---
+
+## Configuración de Docker
+
+El proyecto utiliza un **Dockerfile Multi-stage**, dividido en dos etapas:
+
+- **Build Stage**
+  - Compila el proyecto utilizando Maven y Java 21.
+  - Genera el archivo JAR.
+
+- **Runtime Stage**
+  - Utiliza únicamente Eclipse Temurin JRE 21.
+  - Reduce considerablemente el tamaño final de la imagen.
+  - Evita incluir herramientas de desarrollo en producción.
+
+Durante el despliegue el contenedor se ejecuta configurando el driver de logs de Docker hacia **AWS CloudWatch**, permitiendo centralizar toda la información de ejecución.
+
+---
+
+## Evidencias del Pipeline
+
+Cada ejecución del pipeline genera evidencia de las distintas etapas del proceso:
+
+- Historial completo en GitHub Actions.
+- Reporte de cobertura JaCoCo.
+- Análisis de SonarCloud.
+- Resultado del análisis de Snyk.
+- Imagen Docker almacenada en Amazon ECR.
+- Logs del contenedor disponibles en AWS CloudWatch.
+- Validación automática del endpoint `/actuator/health`.
+
+---
+
+## Cómo ejecutar el proyecto localmente
+
+### Con Maven
+
 ```bash
-docker compose up --build
-
-**Con Maven:**
 mvn spring-boot:run
+```
+
+### Construir la imagen Docker
+
+```bash
+docker build -t saludo-service .
+```
+
+### Ejecutar el contenedor
+
+```bash
+docker run -p 8080:8080 saludo-service
+```
+
+## Configuración de Secrets
+
+Para mantener la seguridad del pipeline, todas las credenciales utilizadas durante el proceso CI/CD se almacenan como **GitHub Repository Secrets**, evitando exponer información sensible dentro del repositorio.
+
+Los principales secretos utilizados son:
+
+| Secret | Descripción |
+|---------|-------------|
+| `AWS_ACCESS_KEY_ID` | Clave de acceso a AWS. |
+| `AWS_SECRET_ACCESS_KEY` | Clave secreta asociada a la cuenta de AWS. |
+| `AWS_SESSION_TOKEN` | Token temporal requerido por AWS Academy. |
+| `AWS_ACCOUNT_ID` | Identificador de la cuenta de AWS utilizado para Amazon ECR. |
+| `AWS_REGION` | Región donde se despliegan los recursos . |
+| `AWS_INSTANCE_ID` | Identificador de la instancia EC2 donde se realiza el despliegue. |
+| `EC2_SSH_KEY` | Llave privada utilizada para la conexión segura con la instancia EC2. |
+| `SONAR_TOKEN` | Token de autenticación para SonarCloud. |
+| `SNYK_TOKEN` | Token de autenticación para Snyk. |
+
+---
+
+## Uso de IA
+
+Se utilizó la IA como herramienta de apoyo para:
+
+- Resolver errores durante la implementación del pipeline.
+- Implementar el envío de logs hacia AWS CloudWatch.
+- Apoyar la redacción y organización de este archivo README.
+
+El diseño del flujo CI/CD, la configuración de la infraestructura en AWS, la implementación del despliegue automático y la integración de las herramientas de observabilidad fueron desarrollados y validados por el equipo de trabajo.
