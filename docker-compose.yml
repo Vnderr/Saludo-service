@@ -1,7 +1,6 @@
 services:
   saludo-app:
-    # IMPORTANTE: Reemplaza con la URL real de tu AWS ECR para que funcione el 'docker compose pull' del pipeline
-    image: 590184124491.dkr.ecr.us-east-1.amazonaws.com/saludo-service:latest
+    image: 603709501479.dkr.ecr.us-east-1.amazonaws.com/saludo-service
     container_name: saludo-service-container
     ports:
       - "8080:8080"
