@@ -7,7 +7,7 @@ RUN mvn clean package -DskipTests
 
 # --- Etapa 2: Ejecución ---
 FROM eclipse-temurin:21-jre
-RUN useradd -m -u 1000 appuser
+RUN useradd -m appuser
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
 RUN chown -R appuser:appuser /app
