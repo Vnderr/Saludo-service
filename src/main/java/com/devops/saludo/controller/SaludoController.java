@@ -54,8 +54,6 @@ public class SaludoController {
     @GetMapping("/readyz")
     public ResponseEntity<Map<String, String>> readyz() {
         try {
-            // Aquí podrías validar conexión a BD u otro recurso crítico
-            // Por ejemplo: saludoService.checkDatabase();
             return ResponseEntity.ok(Map.of(
                     "status", "ready",
                     "service", saludoService.getNombreServicio()));
@@ -65,5 +63,4 @@ public class SaludoController {
                     "error", e.getMessage()));
         }
     }
-
 }

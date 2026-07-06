@@ -50,7 +50,11 @@ jobs:
         with:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-      - run: mvn verify sonar:sonar -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.host.url=https://sonarcloud.io -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+      - run: mvn verify sonar:sonar \
+          -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} \
+          -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.login=${{ secrets.SONAR_TOKEN }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -74,7 +78,7 @@ jobs:
           path: target/site/jacoco/
 
   compliance-check:
-    name: " Compliance Check"
+    name: "✅ Compliance Check"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,7 +88,7 @@ jobs:
             exit 1
           fi
           if [ -f "Dockerfile" ]; then
-            echo " Dockerfile exists"
+            echo "✓ Dockerfile exists"
           fi
 
 # ============================================================
@@ -94,25 +98,43 @@ jobs:
     name: " Build & Push a ECR"
     needs: [security-scan, quality-check, test-coverage, compliance-check]
     runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.build.outputs.image-uri }}
+      image-tag: ${{ steps.build.outputs.image-tag }}
     steps:
       - uses: actions/checkout@v4
+      
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
+      
       - id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-      - run: |
+      
+      - id: build
+        run: |
           IMAGE_TAG="${GITHUB_SHA::7}"
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-      - run: |
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE_URI="${REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          IMAGE_URI_LATEST="${REGISTRY}/${{ env.ECR_REPOSITORY }}:latest"
+          
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "image-uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "image-tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          
           docker build \
-            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG} \
-            -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest .
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+            -t ${IMAGE_URI} \
+            -t ${IMAGE_URI_LATEST} .
+          
+          docker push ${IMAGE_URI}
+          docker push ${IMAGE_URI_LATEST}
+          
+          echo "✓ Image built and pushed successfully"
+          echo "  Tag: ${IMAGE_TAG}"
+          echo "  URI: ${IMAGE_URI}"
 
 # ============================================================
 # FASE 2.5: Acceptance Tests
@@ -122,45 +144,104 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo "Running acceptance tests..."
-          docker run --rm -p 8080:8080 \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG} &
-          sleep 15
-          curl -f http://localhost:8080/saludo || exit 1
-          curl -f http://localhost:8080/info || exit 1
-          curl -f http://localhost:8080/livez || exit 1
-          curl -f http://localhost:8080/readyz || exit 1
-
-# ============================================================
-# FASE 3: Deploy
-# ============================================================
-  deploy:
-    name: " Deploy a EKS"
-    needs: acceptance-tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
+      
+      - id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - run: |
+          IMAGE_TAG="${{ needs.build.outputs.image-tag }}"
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE_URI="${REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          
+          echo "Testing image: ${IMAGE_URI}"
+          echo "Pulling and running container..."
+          
+          docker run --rm -p 8080:8080 \
+            ${IMAGE_URI} &
+          
+          CONTAINER_PID=$!
+          sleep 15
+          
+          echo "Testing endpoints..."
+          curl -v http://localhost:8080/saludo || exit 1
+          echo "✓ /saludo endpoint OK"
+          
+          curl -v http://localhost:8080/info || exit 1
+          echo "✓ /info endpoint OK"
+          
+          curl -v http://localhost:8080/livez || exit 1
+          echo "✓ /livez endpoint OK"
+          
+          curl -v http://localhost:8080/readyz || exit 1
+          echo "✓ /readyz endpoint OK"
+          
+          kill $CONTAINER_PID || true
+          echo "✓ All acceptance tests passed!"
+
+# ============================================================
+# FASE 3: Deploy
+# ============================================================
+  deploy:
+    name: " Deploy a EKS"
+    needs: [acceptance-tests, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
       - uses: azure/setup-kubectl@v4
         with:
           version: v1.29.0
+      
       - run: |
+          echo "Configuring kubectl..."
           aws eks update-kubeconfig \
             --region $AWS_REGION \
             --name "$CLUSTER_NAME"
+          echo "✓ kubectl configured"
+      
       - run: |
+          echo "Creating namespace and applying manifests..."
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/deployment.yaml -n saludo
           kubectl apply -f k8s/service.yaml -n saludo
           kubectl apply -f k8s/hpa.yaml -n saludo
+          echo "✓ All manifests applied"
+      
       - run: |
+          IMAGE_TAG="${{ needs.build.outputs.image-tag }}"
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          IMAGE_URI="${REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          
+          echo "Updating deployment with image: ${IMAGE_URI}"
           kubectl set image deployment/saludo-service \
-            saludo=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG} \
+            saludo-service=${IMAGE_URI} \
             -n saludo
-
+          
+          echo "✓ Deployment updated"
+          
+          echo "Waiting for rollout..."
+          kubectl rollout status deployment/saludo-service -n saludo --timeout=5m
+          echo "✓ Rollout successful"
+          
+          echo ""
+          echo "Deployment Summary:"
+          kubectl get deployment saludo-service -n saludo
+          kubectl get pods -l app=saludo-service -n saludo
