@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saludo-service
+  labels:
+    app: saludo-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: saludo-service
+  template:
+    metadata:
+      labels:
+        app: saludo-service
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: saludo-service
+      containers:
+        - name: saludo-service
+          image: 603709501479.dkr.ecr.us-east-1.amazonaws.com/saludo-service:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: { name: casino-secrets, key: DB_HOST }
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: { name: casino-secrets, key: DB_PORT }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: casino-secrets, key: DB_USER }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: casino-secrets, key: DB_PASSWORD }
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: { name: casino-secrets, key: DB_NAME }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: casino-secrets, key: JWT_SECRET }
+            - name: CORS_ORIGIN
+              value: "*"   
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15

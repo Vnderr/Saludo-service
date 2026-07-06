@@ -1,4 +1,4 @@
-package com.devops.saludo.controller; 
+package com.devops.saludo.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -23,27 +23,47 @@ public class SaludoController {
     @GetMapping("/")
     public ResponseEntity<Map<String, String>> holaMundo() {
         return ResponseEntity.ok(Map.of(
-            "mensaje", saludoService.generarSaludo(null),
-            "version", saludoService.getVersion()
-        ));
+                "mensaje", saludoService.generarSaludo(null),
+                "version", saludoService.getVersion()));
     }
 
     @GetMapping("/saludo")
     public ResponseEntity<Map<String, String>> saludar(
             @RequestParam(defaultValue = "Mundo") String nombre) {
         return ResponseEntity.ok(Map.of(
-            "mensaje", saludoService.generarSaludo(nombre),
-            "version", saludoService.getVersion()
-        ));
+                "mensaje", saludoService.generarSaludo(nombre),
+                "version", saludoService.getVersion()));
     }
 
     @GetMapping("/info")
     public ResponseEntity<Map<String, String>> info() {
         return ResponseEntity.ok(Map.of(
-            "servicio", saludoService.getNombreServicio(),
-            "version", saludoService.getVersion(),
-            "descripcion", "Microservicio de saludo para evaluacion DevOps",
-            "tecnologia", "Spring Boot + Java "
-        ));
+                "servicio", saludoService.getNombreServicio(),
+                "version", saludoService.getVersion(),
+                "descripcion", "Microservicio de saludo para evaluacion DevOps",
+                "tecnologia", "Spring Boot + Java "));
     }
+
+    @GetMapping("/livez")
+    public ResponseEntity<Map<String, String>> livez() {
+        return ResponseEntity.ok(Map.of(
+                "status", "alive",
+                "service", saludoService.getNombreServicio()));
+    }
+
+    @GetMapping("/readyz")
+    public ResponseEntity<Map<String, String>> readyz() {
+        try {
+            // Aquí podrías validar conexión a BD u otro recurso crítico
+            // Por ejemplo: saludoService.checkDatabase();
+            return ResponseEntity.ok(Map.of(
+                    "status", "ready",
+                    "service", saludoService.getNombreServicio()));
+        } catch (Exception e) {
+            return ResponseEntity.status(503).body(Map.of(
+                    "status", "not ready",
+                    "error", e.getMessage()));
+        }
+    }
+
 }
