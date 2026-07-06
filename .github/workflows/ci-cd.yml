@@ -50,13 +50,14 @@ jobs:
         with:
           path: ~/.m2
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-      - run: mvn verify sonar:sonar \
-          -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} \
-          -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} \
+      - run: mvn clean verify sonar:sonar \
+          -Dsonar.projectKey=TU_PROJECT_KEY \
+          -Dsonar.organization=TU_ORG \
           -Dsonar.host.url=https://sonarcloud.io \
           -Dsonar.login=${{ secrets.SONAR_TOKEN }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
 
   test-coverage:
     name: " Test Coverage"
@@ -78,7 +79,7 @@ jobs:
           path: target/site/jacoco/
 
   compliance-check:
-    name: "✅ Compliance Check"
+    name: " Compliance Check"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
